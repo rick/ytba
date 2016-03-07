@@ -9,9 +9,9 @@ require 'jira'
 
 def default_configuration
   {
-    "JIRA_INSTANCE" => "https://tickets.puppetlabs.com",
-    "JIRA_USER"     => nil,
-    "JIRA_PASSWORD" => nil,
+    "JIRA_INSTANCE"     => "https://tickets.puppetlabs.com",
+    "JIRA_USER"         => nil,
+    "JIRA_PASSWORD"     => nil
   }
 end
 
@@ -30,13 +30,13 @@ def fetch_global_settings_from_header(header)
   results = {}
   header.chomp.split("|").map do |assignment|
     key, value = assignment.split("=")
-    results[key.to_sym] = value
+    results[key] = value
   end
   results
 end
 
 def fetch_labels_from_header(header)
-  header.chomp.split("|").map {|key| key.to_sym }
+  header.chomp.split("|").map {|key| key }
 end
 
 def read_ticket_file(ticket_file)
@@ -62,12 +62,41 @@ def read_ticket_file(ticket_file)
   results
 end
 
-def client(config)
-  return @client if @client
-  @client = JIRA::Client.new \
-    :site     => config["JIRA_INSTANCE"],
-    :username => config["JIRA_USER"],
-    :password => config["JIRA_PASSWORD"]
+def connect(config)
+  JIRA::Client.new \
+    :site         => config["JIRA_INSTANCE"],
+    :username     => config["JIRA_USER"],
+    :password     => config["JIRA_PASSWORD"],
+    :auth_type    => :basic,
+    :context_path => ""
+end
+
+def normalize_ticket(dirty_ticket)
+  ticket = dirty_ticket.dup
+
+  ticket["project"]     = { "key" => ticket["project"] }    if ticket["project"]
+  ticket["assignee"]    = { "name" => ticket["assignee"] }  if ticket["assignee"]
+  ticket["issuetype"]   = { "name" => ticket["issuetype"] } if ticket["issuetype"]
+  ticket["issuetype"] ||= { "name" => "Task" }
+
+  if ticket['components']
+    ticket["components"] = ticket["components"].split(",").map do |component|
+      { "name" => component}
+    end
+  end
+
+  ticket
+end
+
+def create_tickets(client, tickets)
+  tickets.each do |ticket|
+    normalized = normalize_ticket ticket
+    puts "Creating ticket:"
+    pp normalized
+    issue = client.Issue.build
+    result = issue.save!({ "fields" => normalized })
+    pp result
+  end
 end
 
 def usage
@@ -81,9 +110,6 @@ ticket_file = ARGV.shift or raise "Datafile not specified\n#{usage}"
 # pull in data for all requested tickets
 ticket_data = read_ticket_file(ticket_file)
 
-require "pp"
-pp config
-pp ticket_data
-
 # create the requested tickets
-pp client(config)
+client = connect(config)
+create_tickets client, ticket_data
